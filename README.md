@@ -1,2 +1,10 @@
-# phantomguardnew
-PhantomGuard: a software simulation of a smart power strip that spots phantom (standby) load. It generates synthetic electricity data, identifies appliances from their power signatures, alerts on standby waste, and shows live usage and DISCOM tariff bills in a Streamlit dashboard.
+## Person 2 — NILM + Phantom Load
+
+### Files
+- nilm_phantom.py — classifier, phantom detector, alerts, CLI
+- data/sample_power_data.csv — test input
+- tests/test_nilm_phantom.py — unit tests
+
+### How to run
+pip install pandas numpy scikit-learn
+python nilm_phantom.py --demo
