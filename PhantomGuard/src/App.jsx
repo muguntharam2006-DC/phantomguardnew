@@ -1,376 +1,1512 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 
-const powerHistory = [
-  { time: "09:00", power: 62 },
-  { time: "09:15", power: 68 },
-  { time: "09:30", power: 72 },
-  { time: "09:45", power: 110 },
-  { time: "10:00", power: 125 },
-  { time: "10:15", power: 118 },
-  { time: "10:30", power: 132 },
-  { time: "10:45", power: 128 },
-  { time: "11:00", power: 9 },
-  { time: "11:15", power: 8 },
-  { time: "11:30", power: 8 },
+const initialPowerHistory = [
+  60, 85, 72, 110, 95, 130, 118, 145, 125, 160, 140,
+];
+
+const initialLimits = [
+  {
+    id: 1,
+    type: "Room",
+    name: "Bedroom",
+    current: 420,
+    limit: 500,
+    enabled: true,
+    autoOff: false,
+    status: "ON",
+  },
+  {
+    id: 2,
+    type: "Room",
+    name: "Living Room",
+    current: 680,
+    limit: 800,
+    enabled: true,
+    autoOff: false,
+    status: "ON",
+  },
+  {
+    id: 3,
+    type: "Device",
+    name: "TV",
+    current: 8,
+    limit: 150,
+    enabled: true,
+    autoOff: true,
+    status: "STANDBY",
+    standbyMinutes: 26,
+    standbyLimit: 30,
+  },
 ];
 
 function App() {
-  const [phantomLoad, setPhantomLoad] = useState(true);
+  const [powerHistory, setPowerHistory] =
+    useState(initialPowerHistory);
+
+  const [limits, setLimits] =
+    useState(initialLimits);
+
+  const [showLimitForm, setShowLimitForm] =
+    useState(false);
+
+  const [assistantDismissed, setAssistantDismissed] =
+    useState(false);
+
+  const [assistantMessage, setAssistantMessage] =
+    useState(null);
+
+  const [phantomLoad, setPhantomLoad] =
+    useState(true);
+
+  const [newLimit, setNewLimit] = useState({
+    type: "Device",
+    name: "",
+    limit: "",
+  });
+
+  /* =====================================================
+     CURRENT DEVICE
+  ===================================================== */
+
+  const monitoredDevice = useMemo(() => {
+    return (
+      limits.find(
+        (item) =>
+          item.type === "Device" &&
+          item.name === "TV"
+      ) ||
+      limits.find(
+        (item) => item.type === "Device"
+      ) ||
+      null
+    );
+  }, [limits]);
+
+  const currentPower = monitoredDevice
+    ? monitoredDevice.current
+    : 0;
+
+  const currentStatus = monitoredDevice
+    ? monitoredDevice.status
+    : "OFF";
+
+  const detectedAppliance =
+    monitoredDevice
+      ? monitoredDevice.name
+      : "None";
+
+  /* =====================================================
+     TARIFF
+  ===================================================== */
+
+  const tariffPerKwh = 6;
+
+  const currentEnergyPerHour =
+    currentPower / 1000;
+
+  const estimatedMonthlyEnergy =
+    currentEnergyPerHour * 24 * 30;
+
+  const estimatedMonthlyCost =
+    estimatedMonthlyEnergy * tariffPerKwh;
+
+  const phantomPower =
+    currentStatus === "STANDBY"
+      ? currentPower
+      : 0;
+
+  const phantomMonthlyEnergy =
+    (phantomPower * 24 * 30) / 1000;
+
+  const phantomMonthlyCost =
+    phantomMonthlyEnergy * tariffPerKwh;
+
+  const potentialMonthlySavings =
+    currentStatus === "STANDBY"
+      ? phantomMonthlyCost
+      : 0;
+
+  const energyUsed =
+    Math.max(
+      0.1,
+      currentPower / 1000
+    ).toFixed(1);
+
+  /* =====================================================
+     DYNAMIC POWER GRAPH
+  ===================================================== */
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setPowerHistory((previous) => {
+        let nextValue = currentPower;
+
+        if (currentStatus === "ON") {
+          const variation =
+            Math.floor(Math.random() * 21) - 10;
+
+          nextValue = Math.max(
+            0,
+            currentPower + variation
+          );
+        }
+
+        if (currentStatus === "STANDBY") {
+          const variation =
+            Math.floor(Math.random() * 3) - 1;
+
+          nextValue = Math.max(
+            0,
+            currentPower + variation
+          );
+        }
+
+        if (currentStatus === "OFF") {
+          nextValue = 0;
+        }
+
+        return [
+          ...previous.slice(-10),
+          nextValue,
+        ];
+      });
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [currentPower, currentStatus]);
+
+  /* =====================================================
+     AUTO OFF
+  ===================================================== */
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setLimits((currentLimits) =>
+        currentLimits.map((item) => {
+          if (
+            item.type !== "Device" ||
+            item.name !== "TV" ||
+            item.status !== "STANDBY" ||
+            !item.autoOff
+          ) {
+            return item;
+          }
+
+          const nextMinutes =
+            (item.standbyMinutes ?? 0) + 1;
+
+          if (
+            nextMinutes >=
+            (item.standbyLimit ?? 30)
+          ) {
+            return {
+              ...item,
+              status: "OFF",
+              current: 0,
+              standbyMinutes: nextMinutes,
+            };
+          }
+
+          return {
+            ...item,
+            standbyMinutes: nextMinutes,
+          };
+        })
+      );
+    }, 10000);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  /* =====================================================
+     ENERGY ASSISTANT
+  ===================================================== */
+
+  useEffect(() => {
+    const exceededItem =
+      limits.find(
+        (item) =>
+          item.enabled &&
+          item.status !== "OFF" &&
+          item.current > item.limit
+      );
+
+    const phantomDevice =
+      limits.find(
+        (item) =>
+          item.type === "Device" &&
+          item.status === "STANDBY" &&
+          item.current > 0
+      );
+
+    if (exceededItem) {
+      setAssistantMessage({
+        type: "limit",
+        device: exceededItem.name,
+        power: exceededItem.current,
+        limit: exceededItem.limit,
+        exceededBy:
+          exceededItem.current -
+          exceededItem.limit,
+      });
+
+      return;
+    }
+
+    if (phantomDevice) {
+      const monthlyWastage =
+        (
+          (phantomDevice.current *
+            24 *
+            30) /
+          1000
+        ).toFixed(1);
+
+      const estimatedCost =
+        Math.round(
+          Number(monthlyWastage) * 6
+        );
+
+      setAssistantMessage({
+        type: "phantom",
+        device: phantomDevice.name,
+        power: phantomDevice.current,
+        standbyMinutes:
+          phantomDevice.standbyMinutes ?? 0,
+        monthlyEnergy:
+          monthlyWastage,
+        monthlyCost:
+          estimatedCost,
+      });
+
+      return;
+    }
+
+    setAssistantMessage(null);
+  }, [limits]);
+
+  /* =====================================================
+     LIMIT CONTROLS
+  ===================================================== */
+
+  const toggleLimit = (id) => {
+    setLimits((currentLimits) =>
+      currentLimits.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              enabled: !item.enabled,
+            }
+          : item
+      )
+    );
+  };
+
+  const toggleAutoOff = (id) => {
+    setLimits((currentLimits) =>
+      currentLimits.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              autoOff: !item.autoOff,
+            }
+          : item
+      )
+    );
+  };
+
+  /* =====================================================
+     DEVICE CONTROLS
+  ===================================================== */
+
+  const turnOffDevice = (id) => {
+    setLimits((currentLimits) =>
+      currentLimits.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              status: "OFF",
+              current: 0,
+            }
+          : item
+      )
+    );
+
+    setPhantomLoad(false);
+    setAssistantDismissed(false);
+  };
+
+  const restoreDevice = (id) => {
+    setLimits((currentLimits) =>
+      currentLimits.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              status: "ON",
+              current:
+                item.name === "TV"
+                  ? 180
+                  : item.current || 100,
+              standbyMinutes: 0,
+            }
+          : item
+      )
+    );
+
+    setAssistantDismissed(false);
+  };
+
+  /* =====================================================
+     DEMO SIMULATION
+  ===================================================== */
+
+  const simulateStandby = () => {
+    setLimits((currentLimits) =>
+      currentLimits.map((item) =>
+        item.name === "TV"
+          ? {
+              ...item,
+              status: "STANDBY",
+              current: 8,
+              standbyMinutes: 0,
+            }
+          : item
+      )
+    );
+
+    setAssistantDismissed(false);
+    setPhantomLoad(true);
+  };
+
+  const simulateHighPower = () => {
+    setLimits((currentLimits) =>
+      currentLimits.map((item) =>
+        item.name === "TV"
+          ? {
+              ...item,
+              status: "ON",
+              current: 180,
+              standbyMinutes: 0,
+            }
+          : item
+      )
+    );
+
+    setAssistantDismissed(false);
+    setPhantomLoad(false);
+  };
+
+  /* =====================================================
+     ASSISTANT ACTIONS
+  ===================================================== */
+
+  const assistantTurnOff = () => {
+    if (!assistantMessage) return;
+
+    const deviceName =
+      assistantMessage.device;
+
+    setLimits((currentLimits) =>
+      currentLimits.map((item) =>
+        item.name === deviceName
+          ? {
+              ...item,
+              status: "OFF",
+              current: 0,
+            }
+          : item
+      )
+    );
+
+    setPhantomLoad(false);
+    setAssistantDismissed(true);
+  };
+
+  const ignoreAssistant = () => {
+    setAssistantDismissed(true);
+  };
+
+  const resetAssistant = () => {
+    setAssistantDismissed(false);
+  };
+
+  /* =====================================================
+     ADD LIMIT
+  ===================================================== */
+
+  const addLimit = () => {
+    console.log("SAVE LIMIT CLICKED");
+
+    const name =
+      String(newLimit.name || "").trim();
+
+    const limitValue =
+      String(newLimit.limit || "").trim();
+
+    if (name === "") {
+      alert("Please enter a device or room name.");
+      return;
+    }
+
+    if (limitValue === "") {
+      alert("Please enter an energy limit.");
+      return;
+    }
+
+    const numericLimit =
+      Number(limitValue);
+
+    if (
+      !Number.isFinite(numericLimit) ||
+      numericLimit <= 0
+    ) {
+      alert("Please enter a valid energy limit greater than 0.");
+      return;
+    }
+
+    const newItem = {
+      id: Date.now(),
+      type: newLimit.type,
+      name: name,
+      current: 0,
+      limit: numericLimit,
+      enabled: true,
+      autoOff: false,
+      status: "ON",
+    };
+
+    if (newLimit.type === "Device") {
+      newItem.standbyMinutes = 0;
+      newItem.standbyLimit = 30;
+    }
+
+    setLimits((previousLimits) => [
+      ...previousLimits,
+      newItem,
+    ]);
+
+    setNewLimit({
+      type: "Device",
+      name: "",
+      limit: "",
+    });
+
+    setShowLimitForm(false);
+  };
+
+  const removeLimit = (id) => {
+    setLimits((currentLimits) =>
+      currentLimits.filter(
+        (item) => item.id !== id
+      )
+    );
+  };
+
+  /* =====================================================
+     GRAPH
+  ===================================================== */
+
+  const graphWidth = 700;
+  const graphHeight = 220;
+
+  const maxPower = Math.max(
+    200,
+    ...powerHistory
+  );
+
+  const graphPoints = powerHistory
+    .map((value, index) => {
+      const x =
+        (index /
+          (powerHistory.length - 1)) *
+        graphWidth;
+
+      const y =
+        graphHeight -
+        (value / maxPower) *
+          (graphHeight - 20);
+
+      return `${x},${y}`;
+    })
+    .join(" ");
+
+  const getStatusClass = (status) => {
+    if (status === "ON") {
+      return "on";
+    }
+
+    if (status === "STANDBY") {
+      return "standby-status";
+    }
+
+    return "off";
+  };
+
+  /* =====================================================
+     UI
+  ===================================================== */
 
   return (
-    <div className="app">
+    <div className="app-shell">
 
-      {/* HEADER */}
-      <header className="header">
+      <header className="top-header">
         <div className="brand">
-          <div className="logo">⚡</div>
+          <div className="brand-mark">
+            P
+          </div>
 
           <div>
-            <h1>PhantomGuard</h1>
-            <p>Smart Energy Monitoring System</p>
+            <h1>
+              PhantomGuard
+            </h1>
+
+            <span>
+              Smart Energy Monitoring System
+            </span>
           </div>
         </div>
 
-        <div className="system-status">
+        <div className="header-status">
           <span className="status-dot"></span>
-          System Active
+          System Online
         </div>
       </header>
 
       <main className="dashboard">
 
-        {/* TITLE */}
-        <section className="page-title">
-          <h2>Energy Dashboard</h2>
-          <p>
-            Monitor appliance usage and identify phantom energy consumption.
-          </p>
+        <section className="dashboard-title">
+          <div>
+            <p className="eyebrow">
+              ENERGY INTELLIGENCE
+            </p>
+
+            <h2>
+              Monitor. Detect. Save.
+            </h2>
+
+            <p>
+              Track energy consumption,
+              identify phantom loads and
+              manage intelligent energy limits.
+            </p>
+          </div>
         </section>
 
-        {/* STAT CARDS */}
         <section className="stats-grid">
 
           <div className="stat-card">
-            <div className="stat-icon teal">⚡</div>
-            <div>
-              <p>Voltage</p>
-              <h3>230 V</h3>
-              <span className="normal">● Normal</span>
-            </div>
+            <span className="stat-label">
+              CURRENT POWER
+            </span>
+
+            <strong>
+              {currentPower}
+              <small> W</small>
+            </strong>
+
+            <span className="stat-meta">
+              Live simulation
+            </span>
           </div>
 
           <div className="stat-card">
-            <div className="stat-icon blue">◉</div>
-            <div>
-              <p>Current Power</p>
-              <h3>8 W</h3>
-              <span className="normal">● Monitoring</span>
-            </div>
+            <span className="stat-label">
+              DETECTED APPLIANCE
+            </span>
+
+            <strong>
+              {detectedAppliance}
+            </strong>
+
+            <span className="stat-meta">
+              AI monitored
+            </span>
           </div>
 
           <div className="stat-card">
-            <div className="stat-icon purple">▣</div>
-            <div>
-              <p>Detected Appliance</p>
-              <h3>TV</h3>
-              <span className="standby">● Standby</span>
-            </div>
+            <span className="stat-label">
+              DEVICE STATUS
+            </span>
+
+            <strong
+              className={
+                currentStatus === "OFF"
+                  ? "off-text"
+                  : "normal-text"
+              }
+            >
+              {currentStatus}
+            </strong>
+
+            <span className="stat-meta">
+              Software state
+            </span>
           </div>
 
           <div className="stat-card">
-            <div className="stat-icon yellow">⚡</div>
-            <div>
-              <p>Energy Used</p>
-              <h3>2.4 kWh</h3>
-              <span className="normal">● Today</span>
-            </div>
+            <span className="stat-label">
+              ENERGY SIMULATION
+            </span>
+
+            <strong>
+              {energyUsed}
+              <small> kWh</small>
+            </strong>
+
+            <span className="stat-meta">
+              Simulated reading
+            </span>
           </div>
 
         </section>
 
-        {/* GRAPH + CURRENT LOAD */}
-        <section className="main-grid">
+        <section className="dashboard-grid">
 
-          {/* POWER GRAPH */}
           <div className="panel graph-panel">
 
             <div className="panel-header">
               <div>
-                <h2>Power Usage</h2>
-                <p>Recent power consumption</p>
+                <span className="panel-kicker">
+                  POWER CONSUMPTION
+                </span>
+
+                <h3>
+                  Energy usage over time
+                </h3>
               </div>
 
-              <div className="live-badge">
-                <span></span>
-                Live
-              </div>
+              <span className="live-badge">
+                ● LIVE SIMULATION
+              </span>
             </div>
 
-            <div className="graph">
+            <div className="graph-container">
 
-              <div className="y-axis">
-                <span>150W</span>
-                <span>100W</span>
-                <span>50W</span>
-                <span>0W</span>
-              </div>
+              <svg
+                viewBox={`0 0 ${graphWidth} ${graphHeight}`}
+                preserveAspectRatio="none"
+                className="power-graph"
+              >
 
-              <div className="graph-area">
+                <line
+                  x1="0"
+                  y1="55"
+                  x2={graphWidth}
+                  y2="55"
+                  className="graph-grid-line"
+                />
 
-                <div className="grid-line"></div>
-                <div className="grid-line"></div>
-                <div className="grid-line"></div>
-                <div className="grid-line"></div>
+                <line
+                  x1="0"
+                  y1="110"
+                  x2={graphWidth}
+                  y2="110"
+                  className="graph-grid-line"
+                />
 
-                <svg
-                  className="graph-svg"
-                  viewBox="0 0 800 260"
-                  preserveAspectRatio="none"
-                >
-                  <polyline
-                    points="
-                      0,150
-                      70,140
-                      140,132
-                      210,75
-                      280,45
-                      350,58
-                      420,30
-                      490,42
-                      560,230
-                      650,235
-                      800,235
-                    "
-                    fill="none"
-                    stroke="#0f766e"
-                    strokeWidth="4"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
+                <line
+                  x1="0"
+                  y1="165"
+                  x2={graphWidth}
+                  y2="165"
+                  className="graph-grid-line"
+                />
 
-                  <polyline
-                    points="
-                      0,150
-                      70,140
-                      140,132
-                      210,75
-                      280,45
-                      350,58
-                      420,30
-                      490,42
-                      560,230
-                      650,235
-                      800,235
-                    "
-                    fill="none"
-                    stroke="#0f766e"
-                    strokeWidth="12"
-                    opacity="0.08"
-                  />
-                </svg>
+                <polyline
+                  points={graphPoints}
+                  fill="none"
+                  className="graph-line"
+                />
 
-                <div className="x-axis">
-                  {powerHistory.map((item) => (
-                    <span key={item.time}>{item.time}</span>
-                  ))}
-                </div>
+              </svg>
 
+              <div className="graph-labels">
+                <span>-30 min</span>
+                <span>-20 min</span>
+                <span>-10 min</span>
+                <span>Now</span>
               </div>
 
             </div>
-
           </div>
 
-          {/* CURRENT LOAD */}
-          <div className="panel appliance-panel">
+          <div className="panel current-load-panel">
 
             <div className="panel-header">
               <div>
-                <h2>Current Load</h2>
-                <p>Detected appliance</p>
-              </div>
+                <span className="panel-kicker">
+                  CURRENT LOAD
+                </span>
 
-              <span className="power-symbol">⏻</span>
+                <h3>
+                  Device activity
+                </h3>
+              </div>
             </div>
 
-            <div className="appliance-main">
+            <div className="current-load-value">
+              <strong>
+                {currentPower}
+              </strong>
 
-              <div className="appliance-icon">
-                ▣
-              </div>
-
-              <h3>TV</h3>
-
-              <p>Standby Mode</p>
-
-              <div className="power-value">
-                8 W
-              </div>
-
+              <span>
+                W
+              </span>
             </div>
 
-            <div className="appliance-info">
+            <div className="load-device">
+
+              <div className="device-icon">
+                TV
+              </div>
 
               <div>
-                <span>Status</span>
-                <strong className="warning-text">
-                  Standby
+                <strong>
+                  {detectedAppliance}
                 </strong>
+
+                <span>
+                  {currentStatus === "STANDBY"
+                    ? "Standby consumption detected"
+                    : currentStatus === "OFF"
+                    ? "Device turned off"
+                    : "Device actively consuming power"}
+                </span>
               </div>
 
-              <div>
-                <span>Power Factor</span>
-                <strong>0.65</strong>
-              </div>
+            </div>
 
+            <div className="load-status-row">
+              <span>Status</span>
+
+              <strong
+                className={
+                  currentStatus === "OFF"
+                    ? "off-status"
+                    : ""
+                }
+              >
+                {currentStatus}
+              </strong>
             </div>
 
           </div>
 
         </section>
 
-        {/* BOTTOM */}
-        <section className="bottom-grid">
+        <section className="dashboard-grid">
 
-          {/* PHANTOM */}
           <div className="panel phantom-panel">
 
             <div className="panel-header">
               <div>
-                <h2>Phantom Load Detection</h2>
-                <p>Standby energy monitoring</p>
+                <span className="panel-kicker">
+                  PHANTOM LOAD
+                </span>
+
+                <h3>
+                  Standby energy detection
+                </h3>
               </div>
 
-              <span className="warning-symbol">⚠</span>
+              <span className="risk-badge">
+                {phantomLoad &&
+                currentStatus === "STANDBY"
+                  ? "DETECTED"
+                  : "NORMAL"}
+              </span>
             </div>
 
-            {phantomLoad ? (
-              <div className="phantom-content">
+            <div className="phantom-content">
 
-                <div className="alert-box">
-
-                  <div className="alert-symbol">
-                    ⚠
-                  </div>
-
-                  <div>
-                    <strong>
-                      Phantom Load Detected
-                    </strong>
-
-                    <p>
-                      TV is consuming 8 W while in standby mode.
-                    </p>
-                  </div>
-
-                </div>
-
-                <div className="phantom-details">
-
-                  <div>
-                    <span>Current standby power</span>
-                    <strong>8 W</strong>
-                  </div>
-
-                  <div>
-                    <span>Estimated monthly wastage</span>
-                    <strong>₹42</strong>
-                  </div>
-
-                </div>
-
-                <button
-                  className="cutoff-button"
-                  onClick={() => setPhantomLoad(false)}
-                >
-                  ⏻
-                  Simulate Power Cutoff
-                </button>
-
+              <div className="phantom-icon">
+                ⚡
               </div>
-            ) : (
-              <div className="safe-state">
 
-                <div className="safe-icon">
-                  ✓
-                </div>
-
-                <h3>No Phantom Load</h3>
+              <div>
+                <strong>
+                  {phantomLoad &&
+                  currentStatus === "STANDBY"
+                    ? `${currentPower} W standby load`
+                    : "No active phantom load"}
+                </strong>
 
                 <p>
-                  The detected standby load has been disconnected.
+                  {phantomLoad &&
+                  currentStatus === "STANDBY"
+                    ? "The monitored device is consuming power while in standby mode."
+                    : "The system currently detects no standby power wastage."}
                 </p>
-
-                <button
-                  className="restore-button"
-                  onClick={() => setPhantomLoad(true)}
-                >
-                  Restore Simulation
-                </button>
-
               </div>
-            )}
+
+            </div>
 
           </div>
 
-          {/* TARIFF */}
           <div className="panel tariff-panel">
 
             <div className="panel-header">
-
               <div>
-                <h2>Tariff Guard</h2>
-                <p>Electricity consumption estimate</p>
+                <span className="panel-kicker">
+                  TARIFF
+                </span>
+
+                <h3>
+                  Energy cost estimate
+                </h3>
               </div>
 
-              <span className="rupee-symbol">₹</span>
-
-            </div>
-
-            <div className="bill-display">
-              <span>Estimated Bill</span>
-              <h3>₹486</h3>
-            </div>
-
-            <div className="tariff-progress">
-
-              <div className="progress-label">
-                <span>Monthly Consumption</span>
-                <strong>124 kWh</strong>
-              </div>
-
-              <div className="progress-bar">
-                <div
-                  className="progress-fill"
-                  style={{ width: "62%" }}
-                ></div>
-              </div>
-
-              <div className="progress-range">
-                <span>0 kWh</span>
-                <span>200 kWh</span>
-              </div>
-
-            </div>
-
-            <div className="tariff-warning">
-              <span>⚠</span>
-
-              <span>
-                Monitor consumption to avoid moving into a higher
-                tariff slab.
+              <span className="live-badge">
+                ₹6 / kWh
               </span>
+            </div>
+
+            <div className="tariff-value">
+              ₹
+              {estimatedMonthlyCost.toFixed(0)}
+              <span>
+                / month
+              </span>
+            </div>
+
+            <div className="tariff-row">
+              <span>
+                Current power
+              </span>
+
+              <strong>
+                {currentPower} W
+              </strong>
+            </div>
+
+            <div className="tariff-row">
+              <span>
+                Monthly energy equivalent
+              </span>
+
+              <strong>
+                {estimatedMonthlyEnergy.toFixed(1)}
+                {" "}kWh
+              </strong>
+            </div>
+
+            <div className="tariff-row">
+              <span>
+                Phantom-load cost
+              </span>
+
+              <strong>
+                ₹
+                {phantomMonthlyCost.toFixed(0)}
+                / month
+              </strong>
+            </div>
+
+            <div className="tariff-row">
+              <span>
+                Potential saving
+              </span>
+
+              <strong className="normal-text">
+                ₹
+                {potentialMonthlySavings.toFixed(0)}
+                / month
+              </strong>
             </div>
 
           </div>
 
         </section>
 
+        <section className="panel assistant-panel">
+
+          <div className="assistant-heading">
+
+            <div className="assistant-icon">
+              ✦
+            </div>
+
+            <div>
+              <span className="panel-kicker">
+                INTELLIGENT RECOMMENDATION
+              </span>
+
+              <h3>
+                Energy Assistant
+              </h3>
+            </div>
+
+            <span className="assistant-badge">
+              RULE-BASED AI
+            </span>
+
+          </div>
+
+          <div className="assistant-content">
+
+            {!assistantDismissed &&
+            assistantMessage ? (
+
+              <div className="assistant-alert">
+
+                <div className="assistant-alert-icon">
+                  !
+                </div>
+
+                <div className="assistant-text">
+
+                  <div className="assistant-title-row">
+                    <strong>
+                      Action recommended
+                    </strong>
+
+                    <span>
+                      {assistantMessage.type ===
+                      "limit"
+                        ? "LIMIT ALERT"
+                        : "PHANTOM LOAD"}
+                    </span>
+                  </div>
+
+                  {assistantMessage.type ===
+                  "limit" ? (
+
+                    <p>
+                      <strong>
+                        {assistantMessage.device}
+                      </strong>{" "}
+                      is consuming{" "}
+                      <strong>
+                        {assistantMessage.power} W
+                      </strong>
+                      , exceeding its configured
+                      limit of{" "}
+                      <strong>
+                        {assistantMessage.limit} W
+                      </strong>{" "}
+                      by{" "}
+                      <strong>
+                        {assistantMessage.exceededBy} W
+                      </strong>.
+                    </p>
+
+                  ) : (
+
+                    <p>
+                      <strong>
+                        {assistantMessage.device}
+                      </strong>{" "}
+                      is using{" "}
+                      <strong>
+                        {assistantMessage.power} W
+                      </strong>{" "}
+                      in standby. Turning it off
+                      could reduce approximately{" "}
+                      <strong>
+                        ₹
+                        {assistantMessage.monthlyCost}
+                      </strong>{" "}
+                      of simulated monthly cost.
+                    </p>
+
+                  )}
+
+                  <div className="assistant-actions">
+
+                    <button
+                      type="button"
+                      className="assistant-turnoff-button"
+                      onClick={assistantTurnOff}
+                    >
+                      Turn Off Device
+                    </button>
+
+                    <button
+                      type="button"
+                      className="assistant-ignore-button"
+                      onClick={ignoreAssistant}
+                    >
+                      Ignore
+                    </button>
+
+                  </div>
+
+                </div>
+
+              </div>
+
+            ) : (
+
+              <div className="assistant-safe">
+
+                <div className="assistant-safe-icon">
+                  ✓
+                </div>
+
+                <div>
+                  <strong>
+                    Energy usage looks normal
+                  </strong>
+
+                  <p>
+                    No immediate energy-saving
+                    action is currently required.
+                  </p>
+                </div>
+
+                <button
+  type="button"
+  className="save-limit-button"
+  onClick={() => {
+    alert("BUTTON CLICKED");
+  }}
+>
+  Save Limit
+</button>
+
+              </div>
+
+            )}
+
+          </div>
+
+        </section>
+
+        {/* =================================================
+            ENERGY LIMITS
+        ================================================= */}
+
+        <section className="panel limits-panel">
+
+          <div className="panel-header">
+
+            <div>
+              <span className="panel-kicker">
+                ENERGY MANAGEMENT
+              </span>
+
+              <h3>
+                Energy Limits
+              </h3>
+
+              <p>
+                Configure consumption limits for
+                rooms and individual devices.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              className="add-limit-button"
+              onClick={() =>
+                setShowLimitForm(
+                  (previous) => !previous
+                )
+              }
+            >
+              + Add Limit
+            </button>
+
+          </div>
+
+          {/* ADD LIMIT FORM */}
+
+          {showLimitForm && (
+
+            <div className="limit-form">
+
+              <div className="form-field">
+
+                <label>
+                  Type
+                </label>
+
+                <select
+                  value={newLimit.type}
+                  onChange={(event) =>
+                    setNewLimit(
+                      (previous) => ({
+                        ...previous,
+                        type: event.target.value,
+                      })
+                    )
+                  }
+                >
+                  <option value="Device">
+                    Device
+                  </option>
+
+                  <option value="Room">
+                    Room
+                  </option>
+                </select>
+
+              </div>
+
+              <div className="form-field">
+
+                <label>
+                  Name
+                </label>
+
+                <input
+                  type="text"
+                  placeholder="e.g. AC"
+                  value={newLimit.name}
+                  onChange={(event) =>
+                    setNewLimit(
+                      (previous) => ({
+                        ...previous,
+                        name: event.target.value,
+                      })
+                    )
+                  }
+                />
+
+              </div>
+
+              <div className="form-field">
+
+                <label>
+                  Limit (W)
+                </label>
+
+                <input
+                  type="number"
+                  placeholder="150"
+                  min="1"
+                  value={newLimit.limit}
+                  onChange={(event) =>
+                    setNewLimit(
+                      (previous) => ({
+                        ...previous,
+                        limit: event.target.value,
+                      })
+                    )
+                  }
+                />
+
+              </div>
+
+              {/* SAVE BUTTON */}
+
+              <button
+                type="button"
+                className="save-limit-button"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  addLimit();
+                }}
+              >
+                Save Limit
+              </button>
+
+            </div>
+
+          )}
+
+          {/* LIMIT LIST */}
+
+          <div className="limits-list">
+
+            {limits.map((item) => {
+
+              const percentage =
+                item.limit > 0
+                  ? Math.min(
+                      100,
+                      Math.round(
+                        (item.current /
+                          item.limit) *
+                          100
+                      )
+                    )
+                  : 0;
+
+              const exceeded =
+                item.enabled &&
+                item.status !== "OFF" &&
+                item.current >
+                  item.limit;
+
+              return (
+
+                <div
+                  className={`limit-item ${
+                    exceeded
+                      ? "limit-exceeded"
+                      : ""
+                  }`}
+                  key={item.id}
+                >
+
+                  <div className="limit-main">
+
+                    <div className="limit-icon">
+                      {item.type === "Room"
+                        ? "⌂"
+                        : "▣"}
+                    </div>
+
+                    <div className="limit-info">
+
+                      <div className="limit-title">
+
+                        <strong>
+                          {item.name}
+                        </strong>
+
+                        <span>
+                          {item.type}
+                        </span>
+
+                        {exceeded && (
+                          <small className="limit-exceeded-label">
+                            LIMIT EXCEEDED
+                          </small>
+                        )}
+
+                      </div>
+
+                      <div className="limit-values">
+                        <span>
+                          {item.current} W
+                        </span>
+
+                        <span>
+                          / {item.limit} W
+                        </span>
+                      </div>
+
+                      <div className="limit-bar">
+
+                        <div
+                          className={`limit-fill ${
+                            exceeded
+                              ? "danger"
+                              : ""
+                          }`}
+                          style={{
+                            width: `${percentage}%`,
+                          }}
+                        />
+
+                      </div>
+
+                    </div>
+
+                  </div>
+
+                  <div className="limit-controls">
+
+                    <button
+                      type="button"
+                      className={
+                        item.enabled
+                          ? "limit-toggle active"
+                          : "limit-toggle"
+                      }
+                      onClick={() =>
+                        toggleLimit(item.id)
+                      }
+                    >
+                      {item.enabled
+                        ? "Enabled"
+                        : "Disabled"}
+                    </button>
+
+                    {item.type ===
+                      "Device" && (
+
+                      <button
+                        type="button"
+                        className="device-action-button"
+                        onClick={() =>
+                          item.status ===
+                          "OFF"
+                            ? restoreDevice(
+                                item.id
+                              )
+                            : turnOffDevice(
+                                item.id
+                              )
+                        }
+                      >
+                        {item.status ===
+                        "OFF"
+                          ? "Restore"
+                          : "Turn Off"}
+                      </button>
+
+                    )}
+
+                    <button
+                      type="button"
+                      className="remove-limit-button"
+                      onClick={() =>
+                        removeLimit(
+                          item.id
+                        )
+                      }
+                    >
+                      ×
+                    </button>
+
+                  </div>
+
+                  {item.type ===
+                    "Device" && (
+
+                    <div className="device-settings">
+
+                      <div className="device-state">
+
+                        <span>
+                          State
+                        </span>
+
+                        <strong
+                          className={`device-status ${getStatusClass(
+                            item.status
+                          )}`}
+                        >
+                          {item.status}
+                        </strong>
+
+                      </div>
+
+                      {item.status ===
+                        "STANDBY" && (
+
+                        <div className="standby-timer">
+
+                          <span>
+                            Standby
+                          </span>
+
+                          <strong>
+                            {item.standbyMinutes ??
+                              0}
+                            /
+                            {item.standbyLimit ??
+                              30}{" "}
+                            min
+                          </strong>
+
+                        </div>
+
+                      )}
+
+                      <div className="auto-off-setting">
+
+                        <span>
+                          Auto-Off
+                        </span>
+
+                        <button
+                          type="button"
+                          className={
+                            item.autoOff
+                              ? "limit-toggle active"
+                              : "limit-toggle"
+                          }
+                          onClick={() =>
+                            toggleAutoOff(
+                              item.id
+                            )
+                          }
+                        >
+                          {item.autoOff
+                            ? "ON"
+                            : "OFF"}
+                        </button>
+
+                      </div>
+
+                    </div>
+
+                  )}
+
+                </div>
+
+              );
+            })}
+
+          </div>
+
+        </section>
+
+        {/* DEMO CONTROLS */}
+
+        <section className="demo-controls">
+
+          <div>
+            <strong>
+              Demo Simulation
+            </strong>
+
+            <span>
+              Use these controls to demonstrate
+              PhantomGuard detection.
+            </span>
+          </div>
+
+          <div className="demo-buttons">
+
+            <button
+              type="button"
+              className="demo-high-button"
+              onClick={simulateHighPower}
+            >
+              Simulate High Power
+            </button>
+
+            <button
+              type="button"
+              className="demo-standby-button"
+              onClick={simulateStandby}
+            >
+              Return to Standby
+            </button>
+
+          </div>
+
+        </section>
+
+        {/* SOFTWARE NOTICE */}
+
+        <div className="software-notice">
+
+          <span>
+            i
+          </span>
+
+          <div>
+
+            <strong>
+              Software Simulation Mode
+            </strong>
+
+            <p>
+              PhantomGuard currently simulates
+              device power states, energy limits,
+              phantom-load detection and
+              automatic turn-off logic in software.
+              No physical electrical device is
+              controlled.
+            </p>
+
+          </div>
+
+        </div>
+
       </main>
 
-      <footer>
-        PhantomGuard • Smart Energy Monitoring Prototype
+      <footer className="footer">
+        PhantomGuard · Smart Energy Monitoring
+        System
       </footer>
 
     </div>
