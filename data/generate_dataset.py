@@ -5,38 +5,79 @@ from datetime import datetime, timedelta
 import pandas as pd
 
 
-# ---------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------
+# =========================================================
+# CONFIGURATION
+# =========================================================
 
 START_TIME = datetime(2026, 9, 23, 8, 0, 0)
 
 # One reading every minute
 INTERVAL_MINUTES = 1
 
-# Reproducible randomness
+# Reproducible random values
 random.seed(42)
 
 
-# ---------------------------------------------------------
-# Appliance scenarios
-# ---------------------------------------------------------
-# Power ranges are chosen to work with the current
-# PhantomGuard NILM signature ranges.
+# =========================================================
+# ROOM CONFIGURATION
+# =========================================================
+# Each room has a maximum allowed simulated load.
+
+ROOM_LIMITS = {
+    "Living Room": 500,
+    "Bedroom": 2000,
+    "Kitchen": 500,
+}
+
+
+# =========================================================
+# APPLIANCE CONFIGURATION
+# =========================================================
+# Device limits are simulated limits for the dashboard.
 #
-# Each scenario:
-#   duration = number of minutes
-#   appliance = user-friendly appliance name
-#   status = ON / Standby / OFF
-#   power_min / power_max = active power range
-#   pf_min / pf_max = power factor range
-#   nilm_label = label corresponding to the current NILM
-# ---------------------------------------------------------
+# These are NOT physical hardware specifications.
+# They are simply thresholds used by PhantomGuard.
+# =========================================================
+
+DEVICE_LIMITS = {
+    "Fan": 50,
+    "TV": 120,
+    "Laptop": 80,
+    "Refrigerator": 220,
+    "AC": 1600,
+}
+
+
+# =========================================================
+# SCENARIOS
+# =========================================================
+#
+# The first six fields are compatible with the existing
+# PhantomGuard NILM input format.
+#
+# power_min / power_max:
+#     simulated active power range
+#
+# pf_min / pf_max:
+#     simulated power-factor range
+#
+# nilm_label:
+#     reference label for validation
+#
+# room:
+#     simulated location of the appliance
+#
+# =========================================================
 
 SCENARIOS = [
-    # Fan
+
+    # -----------------------------------------------------
+    # FAN - LIVING ROOM
+    # -----------------------------------------------------
+
     {
         "duration": 20,
+        "room": "Living Room",
         "appliance": "Fan",
         "status": "ON",
         "power_min": 28,
@@ -45,8 +86,10 @@ SCENARIOS = [
         "pf_max": 0.98,
         "nilm_label": "BLDC Ceiling Fan",
     },
+
     {
         "duration": 10,
+        "room": "Living Room",
         "appliance": "Fan",
         "status": "OFF",
         "power_min": 0.05,
@@ -56,9 +99,14 @@ SCENARIOS = [
         "nilm_label": "Off / Idle",
     },
 
-    # TV
+
+    # -----------------------------------------------------
+    # TV - LIVING ROOM
+    # -----------------------------------------------------
+
     {
         "duration": 20,
+        "room": "Living Room",
         "appliance": "TV",
         "status": "ON",
         "power_min": 60,
@@ -67,8 +115,10 @@ SCENARIOS = [
         "pf_max": 0.99,
         "nilm_label": "Smart TV (Active)",
     },
+
     {
         "duration": 20,
+        "room": "Living Room",
         "appliance": "TV",
         "status": "Standby",
         "power_min": 1,
@@ -78,9 +128,14 @@ SCENARIOS = [
         "nilm_label": "Smart TV (Standby)",
     },
 
-    # Laptop
+
+    # -----------------------------------------------------
+    # LAPTOP - BEDROOM
+    # -----------------------------------------------------
+
     {
         "duration": 20,
+        "room": "Bedroom",
         "appliance": "Laptop",
         "status": "ON",
         "power_min": 45,
@@ -89,8 +144,10 @@ SCENARIOS = [
         "pf_max": 0.99,
         "nilm_label": "Laptop Charger (Active)",
     },
+
     {
         "duration": 20,
+        "room": "Bedroom",
         "appliance": "Laptop",
         "status": "Standby",
         "power_min": 3,
@@ -100,9 +157,14 @@ SCENARIOS = [
         "nilm_label": "Laptop Charger (Idle)",
     },
 
-    # Refrigerator
+
+    # -----------------------------------------------------
+    # REFRIGERATOR - KITCHEN
+    # -----------------------------------------------------
+
     {
         "duration": 20,
+        "room": "Kitchen",
         "appliance": "Refrigerator",
         "status": "ON",
         "power_min": 130,
@@ -111,8 +173,10 @@ SCENARIOS = [
         "pf_max": 0.95,
         "nilm_label": "Refrigerator",
     },
+
     {
         "duration": 15,
+        "room": "Kitchen",
         "appliance": "Refrigerator",
         "status": "OFF",
         "power_min": 0.05,
@@ -122,9 +186,20 @@ SCENARIOS = [
         "nilm_label": "Off / Idle",
     },
 
-    # AC
+
+    # -----------------------------------------------------
+    # AC - BEDROOM
+    # -----------------------------------------------------
+    #
+    # Device limit is 1600 W.
+    #
+    # Some generated AC readings can exceed this limit,
+    # allowing the control logic to simulate AUTO_OFF.
+    #
+
     {
         "duration": 20,
+        "room": "Bedroom",
         "appliance": "AC",
         "status": "ON",
         "power_min": 1300,
@@ -133,22 +208,24 @@ SCENARIOS = [
         "pf_max": 0.98,
         "nilm_label": "Air Conditioner",
     },
+
     {
         "duration": 20,
+        "room": "Bedroom",
         "appliance": "AC",
         "status": "Standby",
         "power_min": 1,
         "power_max": 3,
         "pf_min": 0.20,
         "pf_max": 0.40,
-        "nilm_label": "Smart TV (Standby)",
+        "nilm_label": "Air Conditioner (Standby)",
     },
 ]
 
 
-# ---------------------------------------------------------
-# Helper functions
-# ---------------------------------------------------------
+# =========================================================
+# HELPER FUNCTIONS
+# =========================================================
 
 def generate_voltage():
     """
@@ -159,7 +236,7 @@ def generate_voltage():
 
 def generate_power(scenario):
     """
-    Generate active power within the scenario's range.
+    Generate active power within the scenario range.
     """
     return random.uniform(
         scenario["power_min"],
@@ -169,7 +246,7 @@ def generate_power(scenario):
 
 def generate_power_factor(scenario):
     """
-    Generate a power factor appropriate for the scenario.
+    Generate power factor within the scenario range.
     """
     return random.uniform(
         scenario["pf_min"],
@@ -191,7 +268,10 @@ def calculate_reactive_power(power, power_factor):
     """
     Q = P × tan(acos(PF))
     """
-    power_factor = max(0.01, min(power_factor, 1.0))
+    power_factor = max(
+        0.01,
+        min(power_factor, 1.0)
+    )
 
     angle = math.acos(power_factor)
 
@@ -200,30 +280,48 @@ def calculate_reactive_power(power, power_factor):
 
 def calculate_energy_kwh(power, interval_minutes):
     """
-    Energy (kWh) = Power (W) × time (hours) / 1000
+    Energy (kWh) =
+    Power (W) × time (hours) / 1000
     """
     hours = interval_minutes / 60
 
     return (power * hours) / 1000
 
 
-# ---------------------------------------------------------
-# Dataset generation
-# ---------------------------------------------------------
+# =========================================================
+# DATASET GENERATION
+# =========================================================
 
 def generate_dataset():
+
     rows = []
 
     timestamp = START_TIME
+
     cumulative_energy = 0.0
+
+    # Tracks how long an appliance has remained in standby.
+    standby_duration = 0
 
     for scenario in SCENARIOS:
 
+        # Reset standby counter whenever scenario changes.
+        if scenario["status"] != "Standby":
+            standby_duration = 0
+
         for _ in range(scenario["duration"]):
 
+            # ---------------------------------------------
+            # Electrical values
+            # ---------------------------------------------
+
             voltage = generate_voltage()
+
             power = generate_power(scenario)
-            power_factor = generate_power_factor(scenario)
+
+            power_factor = generate_power_factor(
+                scenario
+            )
 
             current = calculate_current(
                 power,
@@ -243,16 +341,107 @@ def generate_dataset():
 
             cumulative_energy += energy_kwh
 
+
+            # ---------------------------------------------
+            # Room and device limits
+            # ---------------------------------------------
+
+            room = scenario["room"]
+
+            appliance = scenario["appliance"]
+
+            device_limit = DEVICE_LIMITS[appliance]
+
+            room_limit = ROOM_LIMITS[room]
+
+
+            # ---------------------------------------------
+            # Phantom load
+            # ---------------------------------------------
+
+            if scenario["status"] == "Standby":
+
+                standby_duration += INTERVAL_MINUTES
+
+                phantom_load = power
+
+            else:
+
+                standby_duration = 0
+
+                phantom_load = 0.0
+
+
+            # ---------------------------------------------
+            # Control simulation
+            # ---------------------------------------------
+
+            control_mode = "NONE"
+
+            control_action = "NONE"
+
+
+            # Automatic cut-off when device exceeds
+            # its configured power limit.
+            #
+            # We record the event on the reading where
+            # the limit was exceeded.
+
+            if (
+                scenario["status"] == "ON"
+                and power > device_limit
+            ):
+
+                control_mode = "AUTO"
+
+                control_action = "AUTO_OFF"
+
+
+            # ---------------------------------------------
+            # Example manual turn-off event
+            # ---------------------------------------------
+            #
+            # The final minute of the TV ON scenario is
+            # treated as a simulated manual turn-off command.
+            #
+
+            if (
+                appliance == "TV"
+                and scenario["status"] == "ON"
+                and _ == scenario["duration"] - 1
+            ):
+
+                control_mode = "MANUAL"
+
+                control_action = "MANUAL_OFF"
+
+
+            # ---------------------------------------------
+            # Save row
+            # ---------------------------------------------
+
             rows.append({
+
                 "Timestamp": timestamp.strftime(
                     "%Y-%m-%d %H:%M:%S"
                 ),
 
-                "Voltage": round(voltage, 2),
+                "Room": room,
 
-                "Current": round(current, 3),
+                "Voltage": round(
+                    voltage,
+                    2
+                ),
 
-                "ActivePower": round(power, 2),
+                "Current": round(
+                    current,
+                    3
+                ),
+
+                "ActivePower": round(
+                    power,
+                    2
+                ),
 
                 "ReactivePower": round(
                     reactive_power,
@@ -264,7 +453,7 @@ def generate_dataset():
                     3
                 ),
 
-                "Appliance": scenario["appliance"],
+                "Appliance": appliance,
 
                 "Status": scenario["status"],
 
@@ -279,7 +468,23 @@ def generate_dataset():
                     cumulative_energy,
                     6
                 ),
+
+                "DevicePowerLimit_W": device_limit,
+
+                "RoomPowerLimit_W": room_limit,
+
+                "PhantomLoad_W": round(
+                    phantom_load,
+                    2
+                ),
+
+                "PhantomDuration_Min": standby_duration,
+
+                "ControlMode": control_mode,
+
+                "ControlAction": control_action,
             })
+
 
             timestamp += timedelta(
                 minutes=INTERVAL_MINUTES
@@ -288,15 +493,17 @@ def generate_dataset():
     return pd.DataFrame(rows)
 
 
-# ---------------------------------------------------------
-# Main
-# ---------------------------------------------------------
+# =========================================================
+# MAIN
+# =========================================================
 
 if __name__ == "__main__":
 
     df = generate_dataset()
 
-    output_file = "data/phantomguard_energy_dataset.csv"
+    output_file = (
+        "data/phantomguard_energy_dataset.csv"
+    )
 
     df.to_csv(
         output_file,
@@ -307,27 +514,68 @@ if __name__ == "__main__":
     print("==========================================")
     print(" PhantomGuard Dataset Generator")
     print("==========================================")
+
     print()
+
     print(f"Generated rows : {len(df)}")
+
     print(f"Output file    : {output_file}")
+
     print()
+
     print("Columns:")
+
     for column in df.columns:
         print(f"  - {column}")
 
     print()
+
     print("Appliance distribution:")
-    print(df["Appliance"].value_counts())
+
+    print(
+        df["Appliance"].value_counts()
+    )
 
     print()
+
+    print("Room distribution:")
+
+    print(
+        df["Room"].value_counts()
+    )
+
+    print()
+
     print("Status distribution:")
-    print(df["Status"].value_counts())
+
+    print(
+        df["Status"].value_counts()
+    )
 
     print()
+
+    print("Control actions:")
+
+    print(
+        df["ControlAction"].value_counts()
+    )
+
+    print()
+
+    print("Phantom-load rows:")
+
+    print(
+        (df["PhantomLoad_W"] > 0).sum()
+    )
+
+    print()
+
     print("Total energy:")
+
     print(
         f"{df['CumulativeEnergy_kWh'].iloc[-1]:.3f} kWh"
     )
 
     print()
+
     print("Dataset generated successfully!")
